@@ -7,7 +7,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
 from uuid import uuid4
-
+import pyautogui
+import base64
+from pathlib import Path
+from uuid import uuid4
 from anthropic.types.beta import BetaToolComputerUse20241022Param
 
 from .base import BaseAnthropicTool, ToolError, ToolResult
@@ -93,9 +96,9 @@ class ComputerTool(BaseAnthropicTool):
     def __init__(self):
         super().__init__()
 
-        self.width = int(os.getenv("WIDTH") or 0)
-        self.height = int(os.getenv("HEIGHT") or 0)
-        assert self.width and self.height, "WIDTH, HEIGHT must be set"
+        self.width = 1366 #int(os.getenv("WIDTH") or 0)
+        self.height = 768 #int(os.getenv("HEIGHT") or 0)
+        # assert self.width and self.height, "WIDTH, HEIGHT must be set"
         if (display_num := os.getenv("DISPLAY_NUM")) is not None:
             self.display_num = int(display_num)
             self._display_prefix = f"DISPLAY=:{self.display_num} "
@@ -192,7 +195,7 @@ class ComputerTool(BaseAnthropicTool):
                 }[action]
                 return await self.shell(f"{self.xdotool} click {click_arg}")
 
-        raise ToolError(f"Invalid action: {action}")
+
 
     async def screenshot(self):
         """Take a screenshot of the current screen and return the base64 encoded image."""
@@ -200,27 +203,24 @@ class ComputerTool(BaseAnthropicTool):
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"screenshot_{uuid4().hex}.png"
 
-        # Try gnome-screenshot first
-        if shutil.which("gnome-screenshot"):
-            screenshot_cmd = f"{self._display_prefix}gnome-screenshot -f {path} -p"
-        else:
-            # Fall back to scrot if gnome-screenshot isn't available
-            screenshot_cmd = f"{self._display_prefix}scrot -p {path}"
+        # Use pyautogui to take a screenshot
+        screenshot = pyautogui.screenshot()
+        screenshot.save(path)
 
-        result = await self.shell(screenshot_cmd, take_screenshot=False)
+        # If scaling is enabled, resize the image
         if self._scaling_enabled:
             x, y = self.scale_coordinates(
                 ScalingSource.COMPUTER, self.width, self.height
             )
-            await self.shell(
-                f"convert {path} -resize {x}x{y}! {path}", take_screenshot=False
-            )
+            screenshot = screenshot.resize((x, y))
+            screenshot.save(path)
 
         if path.exists():
-            return result.replace(
-                base64_image=base64.b64encode(path.read_bytes()).decode()
-            )
-        raise ToolError(f"Failed to take screenshot: {result.error}")
+            with open(path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode()
+            return ToolResult(output="Screenshot taken", base64_image=base64_image)
+        
+
 
     async def shell(self, command: str, take_screenshot=True) -> ToolResult:
         """Run a shell command and return the output, error, and optionally a screenshot."""
